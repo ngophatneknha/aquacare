@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Bảng màu: nước sạch xanh lam-ngọc, cảnh báo đỏ san hô. Giá trị là kênh "r g b". */
+@layer base {
+  :root {
+    --bg: 233 241 245; --surface: 255 255 255; --sunk: 243 248 250;
+    --ink: 11 34 48; --muted: 87 113 131; --line: 211 225 232;
+    --accent: 10 127 160; --accent2: 47 191 216;
+    --ok: 21 143 98; --warn: 201 125 16; --bad: 209 67 58;
+    --shadow: 11 34 48; --glow: 47 191 216;
+    color-scheme: light;
+  }
+  :root.dark {
+    --bg: 6 21 32; --surface: 11 33 48; --sunk: 9 27 40;
+    --ink: 226 238 244; --muted: 134 162 179; --line: 23 56 75;
+    --accent: 56 198 224; --accent2: 141 232 245;
+    --ok: 63 210 154; --warn: 242 181 74; --bad: 255 107 96;
+    --shadow: 0 0 0; --glow: 56 198 224;
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-bg font-body text-[14px] leading-relaxed text-ink antialiased;
+    background-image: radial-gradient(1200px 520px at 85% -10%, rgb(var(--glow) / .22), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  :focus-visible { @apply rounded-lg outline outline-2 outline-offset-2 outline-accent; }
+  html { transition: background-color .4s; }
+}
+
+@layer components {
+  .panel { @apply min-w-0 rounded-2xl border border-line bg-surface shadow-card; }
+  .eyebrow { @apply text-[11px] font-semibold uppercase tracking-[.12em] text-muted; }
+  .num { @apply font-data tabular-nums; }
+  .pill {
+    @apply inline-flex w-fit items-center gap-1.5 rounded-full bg-ok/15 px-2.5 py-0.5 text-xs font-semibold text-ok transition-colors duration-500;
+  }
+  .pill::before { content: ""; @apply h-1.5 w-1.5 rounded-full bg-current; }
+  .pill-bad { @apply bg-bad/15 text-bad; }
+  .pill-bad::before { animation: blink 1s steps(2) infinite; }
+  .btn {
+    @apply relative overflow-hidden rounded-[10px] bg-accent px-3 py-1.5 text-[13px] font-semibold text-surface transition hover:brightness-110 active:scale-95;
+  }
+  .btn-ghost { @apply border border-line bg-transparent text-ink; }
+}
+
+@layer utilities {
+  .animate-rise { animation: rise .7s cubic-bezier(.2,.8,.2,1) both; }
+  .animate-slide { animation: slide .55s cubic-bezier(.2,.8,.2,1) both; }
+  .animate-toast-in { animation: toastIn .5s cubic-bezier(.2,.8,.2,1) both; }
+  .animate-toast-out { animation: toastOut .4s cubic-bezier(.2,.8,.2,1) forwards; }
+  .animate-alarm { animation: alarm 1.6s ease-out infinite; }
+  .animate-shake { animation: shake .5s; }
+  .animate-pop { animation: pop .4s cubic-bezier(.2,.8,.2,1); }
+  .animate-ring { animation: ring 2s cubic-bezier(.2,.8,.2,1) infinite; }
+}
+
+/* Các hiệu ứng chỉ dịch chuyển, không bắt đầu từ trong suốt: trang luôn đọc được kể cả khi animation bị dừng */
+@keyframes rise { from { transform: translateY(14px) } }
+@keyframes slide { from { transform: translateX(-24px); background: rgb(var(--bad) / .2) } }
+@keyframes toastIn { from { transform: translateY(20px) scale(.96) } }
+@keyframes toastOut { to { transform: translateX(110%); opacity: 0 } }
+@keyframes alarm { 0% { box-shadow: inset 0 0 0 1px rgb(var(--bad)), 0 0 0 0 rgb(var(--bad) / .45) } 100% { box-shadow: inset 0 0 0 1px rgb(var(--bad)), 0 0 0 12px rgb(var(--bad) / 0) } }
+@keyframes shake { 20%, 60% { transform: translateX(-3px) } 40%, 80% { transform: translateX(3px) } }
+@keyframes pop { from { transform: scale(.4) } }
+@keyframes blink { 50% { opacity: .2 } }
+@keyframes ring { 0% { transform: scale(.6); opacity: .9 } 100% { transform: scale(1.9); opacity: 0 } }
+@keyframes ripple { to { transform: scale(3.2); opacity: 0 } }
+.ripple { position: absolute; border-radius: 50%; transform: scale(0); background: currentColor; opacity: .35; animation: ripple .6s ease-out forwards; pointer-events: none; }
+
+dialog::backdrop { background: rgb(4 16 24 / .45); backdrop-filter: blur(3px); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

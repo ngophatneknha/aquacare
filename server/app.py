@@ -4,6 +4,7 @@ Chỉ dùng thư viện chuẩn Python. Chạy: python server/app.py  (mặc đ�
 """
 import hashlib
 import json
+import mimetypes
 import sys
 import os
 import sqlite3
@@ -16,6 +17,10 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).parent
 DB_PATH = os.environ.get("AQUACARE_DB", str(ROOT / "aquacare.db"))
+WEB_DIST = Path(os.environ.get("AQUACARE_WEB", ROOT.parent / "web" / "dist")).resolve()
+# Windows đôi khi map .js sang text/plain qua registry, trình duyệt sẽ từ chối chạy module
+for _type, _ext in (("text/javascript", ".js"), ("text/css", ".css"), ("font/woff2", ".woff2"), ("font/woff", ".woff")):
+    mimetypes.add_type(_type, _ext)
 ADMIN_KEY = os.environ.get("AQUACARE_ADMIN_KEY", "admin-dev-key")  # đổi khi triển khai thật
 
 METRICS = ("ph", "temp", "tds", "turbidity", "flow")
@@ -140,8 +145,6 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         with db() as con:
-            if u.path in ("/", "/index.html"):
-                return self._send(200, ctype="text/html", raw=(ROOT / "dashboard.html").read_bytes())
             if u.path == "/api/devices":
                 rows = con.execute("SELECT id,name,owner FROM devices").fetchall()
                 res = []
@@ -169,7 +172,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, [dict(r) for r in rows])
             if u.path == "/api/verify":
                 return self._send(200, verify_chain(con))
-        self._send(404, {"error": "not found"})
+        if u.path.startswith("/api/"):
+            return self._send(404, {"error": "not found"})
+        self._static(u.path)
+
+    def _static(self, path):
+        """Phục vụ giao diện React đã build (web/dist)."""
+        if not (WEB_DIST / "index.html").is_file():
+            return self._send(503, ctype="text/plain",
+                              raw="Chưa build giao diện: cd web && npm install && npm run build".encode())
+        f = (WEB_DIST / path.lstrip("/")).resolve()
+        if not f.is_relative_to(WEB_DIST) or not f.is_file():
+            f = WEB_DIST / "index.html"  # chặn ../ và trả trang chính cho đường dẫn lạ
+        self._send(200, ctype=mimetypes.guess_type(f.name)[0] or "application/octet-stream", raw=f.read_bytes())
 
     def do_POST(self):
         u = urlparse(self.path)

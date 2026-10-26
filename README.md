@@ -10,7 +10,15 @@ Hệ thống IoT giám sát và cảnh báo sớm chất lượng nước thải
 
 ## Chạy thử (không cần phần cứng)
 
-Cần Python 3.10+, không cài thêm thư viện nào.
+Cần Python 3.10+ (server không cần thư viện ngoài) và Node.js 18+ (để build giao diện).
+
+Build giao diện một lần (và sau mỗi lần sửa code trong `web/`):
+
+```bash
+cd web && npm install && npm run build
+```
+
+Chạy server, server sẽ phục vụ luôn giao diện đã build ở `web/dist`:
 
 ```bash
 python server/app.py
@@ -22,14 +30,19 @@ Mở terminal thứ hai:
 python simulator.py
 ```
 
-Mở http://localhost:8000 để xem dashboard. Chạy test: `cd server && python -m unittest`.
+Mở http://localhost:8000 để xem dashboard.
+
+**Khi sửa giao diện**: để `python server/app.py` chạy, rồi trong `web/` chạy `npm run dev` và mở http://localhost:5173.
+Vite tự tải lại khi lưu file và chuyển `/api` sang server Python.
+
+**Test**: `cd server && python -m unittest` (server) và `cd web && npm test` (logic giao diện). Kiểm tra code: `cd web && npm run lint`.
 
 ## Có gì trong MVP
 
 | Phần | File | Làm gì |
 |---|---|---|
 | Server | `server/app.py` | Nhận số đo, phát hiện vượt ngưỡng + biến động đột ngột, lưu cảnh báo, API |
-| Dashboard | `server/dashboard.html` | Danh sách thiết bị, biểu đồ, cảnh báo, kiểm tra toàn vẹn dữ liệu |
+| Dashboard | `web/` (React 18 + Vite 5 + TailwindCSS 3, Chart.js) | Bể pH sóng động, 4 đồng hồ chỉ số, biểu đồ có ngưỡng QCVN, cảnh báo + toast, kiểm tra toàn vẹn, sáng/tối |
 | Firmware | `firmware/aquacare_esp32/` | Đọc 5 cảm biến, gửi lên server mỗi 30 giây |
 | Giả lập | `simulator.py` | 2 nhà máy ảo, thỉnh thoảng giả lập xả thải bất thường |
 
