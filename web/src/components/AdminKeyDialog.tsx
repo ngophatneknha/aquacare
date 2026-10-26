@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { DEMO } from '../lib/api'
 
 type Props = { open: boolean; onSubmit: (key: string) => Promise<boolean>; onClose: () => void }
 
@@ -38,7 +39,10 @@ export function AdminKeyDialog({ open, onSubmit, onClose }: Props) {
     >
       <form onSubmit={submit}>
         <h4 className="mb-1.5 font-display text-[17px] font-bold">Xác nhận đã xử lý cảnh báo</h4>
-        <p className="mb-3.5 text-muted">Thao tác này được ghi vào nhật ký chống sửa. Nhập khóa quản trị để tiếp tục.</p>
+        <p className="mb-3.5 text-muted">
+          Thao tác này được ghi vào nhật ký chống sửa. Nhập khóa quản trị để tiếp tục.
+          {DEMO && ' Bản demo nhận khóa bất kỳ.'}
+        </p>
         <label htmlFor="admin-key" className="eyebrow">Khóa quản trị</label>
         <input
           id="admin-key"

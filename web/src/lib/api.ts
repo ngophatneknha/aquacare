@@ -1,3 +1,5 @@
+import { demoApi } from './demo'
+
 export type MetricKey = 'ph' | 'temp' | 'tds' | 'turbidity' | 'flow'
 export type Values = Partial<Record<MetricKey, number>>
 export type Reading = Values & { ts: number }
@@ -12,7 +14,7 @@ async function get<T>(path: string): Promise<T> {
   return r.json()
 }
 
-export const api = {
+const httpApi = {
   devices: () => get<Device[]>('/api/devices'),
   readings: (device: string, limit = 200) => get<Reading[]>(`/api/readings?device=${encodeURIComponent(device)}&limit=${limit}`),
   alerts: () => get<Alert[]>('/api/alerts'),
@@ -30,3 +32,7 @@ export const api = {
     return true
   },
 }
+
+/** Build với VITE_DEMO=true (bản Netlify) thì dùng dữ liệu giả lập trong trình duyệt thay cho server */
+export const DEMO = import.meta.env.VITE_DEMO === 'true'
+export const api: typeof httpApi = DEMO ? demoApi() : httpApi

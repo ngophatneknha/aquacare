@@ -37,6 +37,16 @@ Vite tự tải lại khi lưu file và chuyển `/api` sang server Python.
 
 **Test**: `cd server && python -m unittest` (server) và `cd web && npm test` (logic giao diện). Kiểm tra code: `cd web && npm run lint`.
 
+## Deploy bản demo lên Netlify
+
+Netlify chỉ chạy giao diện tĩnh, không chạy server Python, nên bản trên Netlify dùng **dữ liệu giả lập ngay trong trình duyệt**
+(2 nhà máy ảo, có sự cố, cảnh báo, chuỗi băm). Trang có nhãn "Bản demo · dữ liệu giả lập" để không bị nhầm với số đo thật.
+
+Netlify → *Add new site* → *Import from GitHub* → chọn repo này. Không cần chỉnh gì: `netlify.toml` đã khai báo
+thư mục `web`, lệnh build và biến `VITE_DEMO=true`.
+
+Thử bản demo ở máy: `cd web && VITE_DEMO=true npm run build && npx vite preview`.
+
 ## Có gì trong MVP
 
 | Phần | File | Làm gì |

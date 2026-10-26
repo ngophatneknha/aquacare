@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type ChainStatus } from '../lib/api'
+import { api, DEMO, type ChainStatus } from '../lib/api'
 import { ago } from '../lib/metrics'
 import { useNow } from '../hooks/useNow'
 import type { ThemeChoice } from '../hooks/useTheme'
@@ -17,6 +17,11 @@ export function Header({ online, lastTs, theme, onTheme }: Props) {
             <div className="mt-0.5 text-xs text-muted">Giám sát nước thải sau xử lý · bể chứa cuối</div>
           </div>
         </div>
+        {DEMO && (
+          <span className="rounded-full border border-warn/50 bg-warn/10 px-2.5 py-1 text-xs font-semibold text-warn" title="Bản trình diễn: số đo được giả lập trong trình duyệt, không phải dữ liệu thật">
+            Bản demo · dữ liệu giả lập
+          </span>
+        )}
         <LiveStatus online={online} lastTs={lastTs} />
         <IntegrityButton />
         <ThemeToggle value={theme} onChange={onTheme} />
