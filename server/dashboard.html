@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AQUA CARE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* Layout: thanh trạng thái dính trên cùng → "bể chứa" sống (pH) + 4 đồng hồ chỉ số → thiết bị | biểu đồ → dòng thời gian cảnh báo */
+:root {
+  --bg: #e9f1f5;  --surface: #ffffff; --sunk: #f3f8fa; --ink: #0b2230; --muted: #577183; --line: #d3e1e8;
+  --accent: #0a7fa0; --accent-2: #2fbfd8; --ok: #158f62; --warn: #c97d10; --bad: #d1433a;
+  --glow: rgba(47,191,216,.28); --shadow: 0 1px 2px rgba(11,34,48,.06), 0 8px 24px -12px rgba(11,34,48,.18);
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --r: 14px; --ease: cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #061520; --surface: #0b2130; --sunk: #08192540; --ink: #e2eef4; --muted: #86a2b3; --line: #17384b;
+  --accent: #38c6e0; --accent-2: #8de8f5; --ok: #3fd29a; --warn: #f2b54a; --bad: #ff6b60;
+  --glow: rgba(56,198,224,.22); --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px -16px rgba(0,0,0,.6); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #061520; --surface: #0b2130; --sunk: #08192540; --ink: #e2eef4; --muted: #86a2b3; --line: #17384b;
+  --accent: #38c6e0; --accent-2: #8de8f5; --ok: #3fd29a; --warn: #f2b54a; --bad: #ff6b60;
+  --glow: rgba(56,198,224,.22); --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 32px -16px rgba(0,0,0,.6); color-scheme: dark }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 14px/1.55 var(--f-body);
+  background-image: radial-gradient(1200px 500px at 85% -10%, var(--glow), transparent 60%);
+  background-attachment: fixed; min-height: 100vh;
+}
+.wrap { max-width: 1320px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.num { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+
+/* ---- Thanh trạng thái ---- */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; align-items: center; gap: 14px; padding-block: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand svg { width: 30px; height: 30px; }
+.brand b { font: 800 19px/1 var(--f-display); letter-spacing: -.01em; }
+.brand small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.live { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); position: relative; }
+.live i::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--ok); animation: ping 2s var(--ease) infinite; }
+.live.stale i, .live.stale i::after { background: var(--warn); border-color: var(--warn); }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 500; transition: border-color .3s, background .3s, transform .15s; }
+.chip:hover { transform: translateY(-1px); border-color: var(--accent); }
+.chip:active { transform: translateY(0) scale(.98); }
+.chip svg { width: 16px; height: 16px; flex: none; }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.chip.bad { color: var(--bad); border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--surface)); animation: shake .5s; }
+.chip.busy svg { animation: spin .8s linear infinite; }
+
+/* ---- Khối chính ---- */
+main.wrap { display: grid; gap: 18px; padding-block: 20px 40px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); min-width: 0; }
+.rise { animation: rise .7s var(--ease) both; }
+.hero { display: grid; grid-template-columns: minmax(280px, 1.05fr) 2fr; gap: 18px; }
+@media (max-width: 960px) { .hero { grid-template-columns: 1fr; } }
+
+/* Bể chứa pH */
+.tank { position: relative; overflow: hidden; min-height: 300px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); isolation: isolate; }
+.tank canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; }
+.tank-body { padding: 20px; display: flex; flex-direction: column; height: 100%; gap: 6px; }
+.tank h2 { margin: 0; font: 700 15px var(--f-display); }
+.tank .big { font: 800 clamp(64px, 9vw, 104px)/.95 var(--f-display); letter-spacing: -.04em; margin-top: 8px; text-shadow: 0 2px 18px var(--surface); }
+.tank .scale { margin-top: auto; display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--ink); opacity: .75; }
+@media (max-width: 600px) { header { position: static; } }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; width: fit-content;
+  background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); transition: background .4s, color .4s; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.bad { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+.pill.bad::before { animation: blink 1s steps(2) infinite; }
+.reg { font-size: 12px; color: var(--muted); }
+
+/* 4 đồng hồ */
+.gauges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 560px) { .gauges { grid-template-columns: 1fr; } }
+.gauge { padding: 16px 16px 14px; display: grid; gap: 8px; position: relative; overflow: hidden; transition: transform .3s var(--ease), border-color .3s; }
+.gauge:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.gauge.bad { border-color: var(--bad); }
+.gauge.bad::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px var(--bad), 0 0 0 0 var(--bad); animation: alarm 1.6s ease-out infinite; }
+.gauge-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.gauge .val { font: 700 32px/1 var(--f-display); letter-spacing: -.02em; }
+.gauge .val small { font: 500 13px var(--f-body); color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.gauge canvas { width: 100%; height: 46px; display: block; }
+.bar { position: relative; height: 6px; border-radius: 6px; background: var(--sunk); border: 1px solid var(--line); }
+.bar .zone { position: absolute; top: -1px; bottom: -1px; border-radius: 6px; background: color-mix(in srgb, var(--ok) 30%, transparent); }
+.bar .mark { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--surface); border: 3px solid var(--accent);
+  transition: left .9s var(--ease), border-color .3s; }
+.gauge.bad .bar .mark { border-color: var(--bad); }
+.bar-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+/* Thiết bị + biểu đồ */
+.split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; }
+@media (max-width: 960px) { .split { grid-template-columns: 1fr; } }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 0; flex-wrap: wrap; }
+.panel-head h3 { margin: 0; font: 700 16px var(--f-display); text-wrap: balance; }
+.devices { padding: 12px; display: grid; gap: 8px; }
+.dev { position: relative; text-align: left; width: 100%; padding: 12px 12px 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); color: var(--ink);
+  display: grid; gap: 2px; transition: border-color .25s, background .25s, transform .2s var(--ease); }
+.dev:hover { transform: translateX(3px); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.dev.sel { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.dev::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--ok); }
+.dev.alarm::before { background: var(--bad); }
+.dev b { font-weight: 600; }
+.dev small { color: var(--muted); font-size: 12px; }
+.dev .count { position: absolute; right: 10px; top: 10px; font: 600 11px var(--f-data); padding: 1px 8px; border-radius: 999px; background: var(--bad); color: #fff; animation: pop .4s var(--ease); }
+.tabs { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--sunk); border: 1px solid var(--line); position: relative; flex-wrap: wrap; }
+.tabs button { border: 0; background: transparent; color: var(--muted); padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; position: relative; z-index: 1; transition: color .25s; }
+.tabs button[aria-selected="true"] { color: var(--ink); }
+.tabs .slider { position: absolute; z-index: 0; top: 3px; height: calc(100% - 6px); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); transition: left .35s var(--ease), width .35s var(--ease), top .35s var(--ease); }
+.chart-box { position: relative; height: 320px; padding: 8px 12px 14px; }
+.empty { padding: 24px 16px; color: var(--muted); }
+
+/* Cảnh báo */
+.alerts { list-style: none; margin: 0; padding: 8px 16px 16px; display: grid; gap: 8px; max-height: 420px; overflow-y: auto; }
+.alert { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); position: relative; overflow: hidden; }
+.alert::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bad); }
+.alert.done { opacity: .62; }
+.alert.done::before { background: var(--ok); }
+.alert.enter { animation: slide .55s var(--ease) both; }
+.alert .ico { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--bad) 13%, transparent); color: var(--bad); font: 700 12px var(--f-data); }
+.alert.done .ico { background: color-mix(in srgb, var(--ok) 13%, transparent); color: var(--ok); }
+.alert .what { min-width: 0; }
+.alert .what b { font-weight: 600; }
+.alert .what small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn { border: 0; border-radius: 9px; padding: 7px 12px; background: var(--accent); color: var(--surface); font-weight: 600; font-size: 13px; position: relative; overflow: hidden; transition: transform .15s, filter .2s; }
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: scale(.96); }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.ripple { position: absolute; border-radius: 50%; transform: scale(0); background: currentColor; opacity: .35; animation: ripple .6s ease-out forwards; pointer-events: none; }
+.done-tag { color: var(--ok); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+
+/* Toast + hộp thoại */
+.toasts { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 20; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); }
+.toast { background: var(--surface); border: 1px solid var(--bad); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); animation: toastIn .5s var(--ease) both; }
+.toast.out { animation: toastOut .4s var(--ease) forwards; }
+.toast b { color: var(--bad); }
+dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 20px; width: min(380px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+dialog::backdrop { background: rgba(4,16,24,.45); backdrop-filter: blur(3px); }
+dialog[open] { animation: rise .35s var(--ease); }
+dialog h4 { margin: 0 0 6px; font: 700 17px var(--f-display); }
+dialog p { margin: 0 0 14px; color: var(--muted); }
+dialog input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); color: var(--ink); font: 14px var(--f-data); }
+dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+dialog .err { color: var(--bad); font-size: 12.5px; margin-top: 8px; min-height: 1em; }
+
+@keyframes ping { 0% { transform: scale(.6); opacity: .9 } 100% { transform: scale(1.8); opacity: 0 } }
+@keyframes spin { to { transform: rotate(360deg) } }
+@keyframes shake { 20%,60% { transform: translateX(-3px) } 40%,80% { transform: translateX(3px) } }
+@keyframes rise { from { transform: translateY(14px) } }
+@keyframes blink { 50% { opacity: .2 } }
+@keyframes alarm { 0% { box-shadow: inset 0 0 0 1px var(--bad), 0 0 0 0 color-mix(in srgb, var(--bad) 45%, transparent) } 100% { box-shadow: inset 0 0 0 1px var(--bad), 0 0 0 12px transparent } }
+@keyframes pop { from { transform: scale(.4) } }
+@keyframes slide { from { transform: translateX(-24px); background: color-mix(in srgb, var(--bad) 20%, var(--sunk)) } }
+@keyframes ripple { to { transform: scale(3.2); opacity: 0 } }
+@keyframes toastIn { from { transform: translateY(20px) scale(.96) } }
+@keyframes toastOut { to { transform: translateX(110%); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent-2)"/><stop offset="1" stop-color="var(--accent)"/></linearGradient></defs>
+        <path d="M16 3c5 6.5 9 11.3 9 16a9 9 0 0 1-18 0c0-4.7 4-9.5 9-16z" fill="url(#dg)"/><path d="M10.5 20.5c1.6 1.4 3.4 1.4 5 0s3.4-1.4 5 0" stroke="var(--surface)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+      <div><b>AQUA CARE</b><small>Giám sát nước thải sau xử lý · bể chứa cuối</small></div>
+    </div>
+    <span class="live" id="live"><i></i><span id="liveText">Đang kết nối…</span></span>
+    <button class="chip" id="chain" type="button" title="Kiểm tra chuỗi băm của toàn bộ dữ liệu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>
+      <span id="chainText">Kiểm tra toàn vẹn</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div class="tank rise" id="tank">
+      <canvas id="wave" aria-hidden="true"></canvas>
+      <div class="tank-body">
+        <span class="eyebrow" id="tankDev">Thiết bị —</span>
+        <h2>pH nước thải</h2>
+        <div class="big num" id="phVal">—</div>
+        <span class="pill" id="phPill">Đang chờ dữ liệu</span>
+        <span class="reg">Giới hạn <span class="num" id="phRange">5.5 – 9.0</span> · QCVN 40:2011/BTNMT cột B</span>
+        <div class="scale num"><span>0 axit</span><span>7 trung tính</span><span>14 kiềm</span></div>
+      </div>
+    </div>
+    <div class="gauges" id="gauges"></div>
+  </section>
+
+  <section class="split">
+    <div class="panel rise" style="animation-delay:.15s">
+      <div class="panel-head"><h3>Điểm quan trắc</h3><span class="eyebrow" id="devCount"></span></div>
+      <div class="devices" id="devices"><div class="empty">Chưa có thiết bị nào gửi dữ liệu. Chạy <code>python simulator.py</code> để thử.</div></div>
+    </div>
+    <div class="panel rise" style="animation-delay:.22s">
+      <div class="panel-head">
+        <h3 id="chartTitle">Diễn biến 200 mẫu gần nhất</h3>
+        <div class="tabs" role="tablist" id="tabs"><span class="slider" id="slider"></span></div>
+      </div>
+      <div class="chart-box"><canvas id="chart" aria-label="Biểu đồ chỉ số theo thời gian"></canvas></div>
+    </div>
+  </section>
+
+  <section class="panel rise" style="animation-delay:.3s">
+    <div class="panel-head"><h3>Cảnh báo</h3><span class="eyebrow" id="alertCount"></span></div>
+    <ul class="alerts" id="alerts"><li class="empty">Chưa có cảnh báo nào.</li></ul>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog id="keyDlg">
+  <form method="dialog" id="keyForm">
+    <h4>Xác nhận đã xử lý cảnh báo</h4>
+    <p>Thao tác này được ghi vào nhật ký chống sửa. Nhập khóa quản trị để tiếp tục.</p>
+    <label class="eyebrow" for="keyInput">Khóa quản trị</label>
+    <input id="keyInput" type="password" autocomplete="off" required>
+    <div class="err" id="keyErr"></div>
+    <div class="row"><button class="btn ghost" value="cancel" formnovalidate>Hủy</button><button class="btn" value="ok">Xác nhận</button></div>
+  </form>
+</dialog>
+
+<script>
+const M = {
+  ph:        { label: "pH",        unit: "",       dec: 2, span: [0, 14] },
+  temp:      { label: "Nhiệt độ",  unit: "°C",     dec: 1, span: [0, 60] },
+  tds:       { label: "TDS",       unit: "ppm",    dec: 0, span: [0, 3000] },
+  turbidity: { label: "Độ đục",    unit: "NTU",    dec: 1, span: [0, 200] },
+  flow:      { label: "Lưu lượng", unit: "L/phút", dec: 1, span: [0, 200] },
+};
+const GAUGES = ["temp", "tds", "turbidity", "flow"];
+const S = { selected: null, metric: "ph", th: {}, rows: [], maxAlert: null, lastTs: 0, ackId: null };
+const $ = id => document.getElementById(id);
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const get = p => fetch(p).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (m, v) => v == null ? "—" : Number(v).toFixed(M[m].dec);
+const out = (m, v) => { const [lo, hi] = S.th[m] || []; return v != null && ((lo != null && v < lo) || (hi != null && v > hi)); };
+const ago = ts => { const s = Math.max(0, Math.round(Date.now() / 1000 - ts)); return s < 60 ? `${s} giây trước` : s < 3600 ? `${Math.round(s / 60)} phút trước` : new Date(ts * 1000).toLocaleString("vi-VN"); };
+
+// Số chạy mượt tới giá trị mới
+function tween(el, to, dec) {
+  const from = el._v ?? to; el._v = to;
+  if (reduce || from === to) { el.textContent = to.toFixed(dec); return; }
+  const t0 = performance.now(), d = 700;
+  cancelAnimationFrame(el._raf);
+  const step = t => { const k = Math.min(1, (t - t0) / d), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = (from + (to - from) * e).toFixed(dec); if (k < 1) el._raf = requestAnimationFrame(step); };
+  el._raf = requestAnimationFrame(step);
+}
+
+// Hiệu ứng gợn sóng khi bấm nút
+document.addEventListener("pointerdown", e => {
+  const b = e.target.closest(".btn, .chip"); if (!b || reduce) return;
+  const r = b.getBoundingClientRect(), s = document.createElement("span"), d = Math.max(r.width, r.height);
+  s.className = "ripple"; s.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px`;
+  b.appendChild(s); setTimeout(() => s.remove(), 650);
+});
+
+/* ---------- Bể chứa: sóng nước + bọt khí, màu theo trạng thái pH ---------- */
+const wave = { level: .5, target: .5, bad: 0, badTarget: 0, t: 0, bubbles: [] };
+(function initWave() {
+  const cv = $("wave"), ctx = cv.getContext("2d");
+  const fit = () => { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1; cv.width = r.width * d; cv.height = r.height * d; ctx.setTransform(d, 0, 0, d, 0, 0); };
+  new ResizeObserver(fit).observe(cv); fit();
+  const mix = (a, b, k) => { const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); const A = p(a), B = p(b); return A.map((x, i) => Math.round(x + (B[i] - x) * k)); };
+  function frame() {
+    const w = cv.clientWidth, h = cv.clientHeight;
+    wave.level += (wave.target - wave.level) * .04; wave.bad += (wave.badTarget - wave.bad) * .05; wave.t += .016;
+    ctx.clearRect(0, 0, w, h);
+    const c1 = mix(css("--accent-2"), css("--bad"), wave.bad), c2 = mix(css("--accent"), css("--bad"), wave.bad);
+    const base = h * (1 - wave.level * .82) - 4;
+    [[.18, 14, 1.1, 0], [.28, 10, 1.6, 2], [.42, 7, 2.3, 4]].forEach(([a, amp, sp, ph], i) => {
+      const g = ctx.createLinearGradient(0, base, 0, h);
+      g.addColorStop(0, `rgba(${c1},${a})`); g.addColorStop(1, `rgba(${c2},${a + .12})`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, h);
+      for (let x = 0; x <= w; x += 6) ctx.lineTo(x, base + i * 6 + Math.sin(x / (90 + i * 30) + wave.t * sp + ph) * amp + Math.sin(x / 37 + wave.t * sp * 1.7) * amp * .25);
+      ctx.lineTo(w, h); ctx.closePath(); ctx.fill();
+    });
+    if (wave.bubbles.length < 26 && Math.random() < .3) wave.bubbles.push({ x: Math.random() * w, y: h + 6, r: 1 + Math.random() * 3, v: .3 + Math.random() * .8, s: Math.random() * 6 });
+    ctx.fillStyle = `rgba(${c1},.55)`;
+    wave.bubbles = wave.bubbles.filter(b => { b.y -= b.v; b.x += Math.sin(wave.t * 2 + b.s) * .3;
+      if (b.y < base + 8) return false; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 7); ctx.fill(); return true; });
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  frame();
+  if (reduce) setInterval(frame, 1000); // vẫn cập nhật mức nước, chỉ bỏ chuyển động
+})();
+
+/* ---------- Đồng hồ chỉ số ---------- */
+$("gauges").innerHTML = GAUGES.map((m, i) => `
+  <div class="panel gauge rise" id="g-${m}" style="animation-delay:${.05 + i * .06}s">
+    <div class="gauge-top"><span class="eyebrow">${M[m].label}</span><span class="pill" id="p-${m}">—</span></div>
+    <div class="val num"><span id="v-${m}">—</span><small>${M[m].unit}</small></div>
+    <canvas id="s-${m}" aria-hidden="true"></canvas>
+    <div class="bar"><span class="zone" id="z-${m}"></span><span class="mark" id="k-${m}" style="left:0%"></span></div>
+    <div class="bar-legend num"><span>${M[m].span[0]}</span><span id="l-${m}"></span><span>${M[m].span[1]}</span></div>
+  </div>`).join("");
+
+function spark(m, vals) {
+  const cv = $("s-" + m), d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w) return;
+  cv.width = w * d; cv.height = h * d;
+  const ctx = cv.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
+  const v = vals.slice(-60).filter(x => x != null); if (v.length < 2) return;
+  const lo = Math.min(...v), hi = Math.max(...v), r = hi - lo || 1, color = out(m, v.at(-1)) ? css("--bad") : css("--accent");
+  const pts = v.map((y, i) => [i / (v.length - 1) * (w - 6) + 3, h - 5 - (y - lo) / r * (h - 10)]);
+  const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, color + "55"); g.addColorStop(1, color + "00");
+  ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.lineTo(pts.at(-1)[0], h); ctx.lineTo(pts[0][0], h); ctx.fillStyle = g; ctx.fill();
+  ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.lineJoin = "round"; ctx.stroke();
+  const [ex, ey] = pts.at(-1); ctx.fillStyle = color; ctx.beginPath(); ctx.arc(ex, ey, 3, 0, 7); ctx.fill();
+}
+
+function renderGauges(last) {
+  for (const m of GAUGES) {
+    const v = last[m], [a, b] = M[m].span, pct = x => Math.max(0, Math.min(100, (x - a) / (b - a) * 100));
+    const [lo, hi] = S.th[m] || [], bad = out(m, v);
+    if (v != null) tween($("v-" + m), v, M[m].dec); else $("v-" + m).textContent = "—";
+    $("g-" + m).classList.toggle("bad", bad);
+    $("p-" + m).className = "pill" + (bad ? " bad" : ""); $("p-" + m).textContent = v == null ? "—" : bad ? "Vượt ngưỡng" : "Trong ngưỡng";
+    $("z-" + m).style.cssText = `left:${pct(lo ?? a)}%;right:${100 - pct(hi ?? b)}%`;
+    $("k-" + m).style.left = (v == null ? 0 : pct(v)) + "%";
+    $("l-" + m).textContent = lo == null && hi == null ? "không giới hạn" : `${lo ?? ""}${lo != null && hi != null ? " – " : ""}${hi != null ? (lo == null ? "≤ " : "") + hi : ""}`;
+    spark(m, S.rows.map(r => r[m]));
+  }
+  const ph = last.ph, bad = out("ph", ph), [lo, hi] = S.th.ph || [];
+  if (ph != null) { tween($("phVal"), ph, 2); wave.target = Math.max(.08, Math.min(.95, ph / 14)); }
+  wave.badTarget = bad ? 1 : 0;
+  $("phVal").style.color = bad ? "var(--bad)" : "";
+  $("phPill").className = "pill" + (bad ? " bad" : "");
+  $("phPill").textContent = ph == null ? "Đang chờ dữ liệu" : bad ? (ph < lo ? "Quá axit · vượt ngưỡng" : "Quá kiềm · vượt ngưỡng") : "Đạt quy chuẩn";
+  $("phRange").textContent = `${lo ?? "—"} – ${hi ?? "—"}`;
+}
+
+/* ---------- Biểu đồ ---------- */
+$("tabs").insertAdjacentHTML("beforeend", Object.keys(M).map(m =>
+  `<button role="tab" type="button" data-m="${m}" aria-selected="${m === S.metric}">${M[m].label}</button>`).join(""));
+function moveSlider() {
+  const b = $("tabs").querySelector('[aria-selected="true"]');
+  Object.assign($("slider").style, { left: b.offsetLeft + "px", width: b.offsetWidth + "px", top: b.offsetTop + "px", height: b.offsetHeight + "px" });
+}
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-m]"); if (!b) return;
+  S.metric = b.dataset.m;
+  $("tabs").querySelectorAll("button").forEach(x => x.setAttribute("aria-selected", x === b));
+  moveSlider(); drawChart(true);
+});
+addEventListener("resize", moveSlider);
+document.fonts?.ready.then(moveSlider);
+
+const thresholdLines = {
+  id: "thresholds",
+  afterDatasetsDraw(c) {
+    const [lo, hi] = S.th[S.metric] || [], { ctx, chartArea: a, scales: { y } } = c;
+    ctx.save(); ctx.setLineDash([6, 5]); ctx.lineWidth = 1.2; ctx.font = "600 11px " + css("--f-body"); ctx.fillStyle = ctx.strokeStyle = css("--bad");
+    for (const [v, txt] of [[lo, "ngưỡng dưới"], [hi, "ngưỡng trên"]]) {
+      if (v == null || v < y.min || v > y.max) continue;
+      const py = y.getPixelForValue(v);
+      ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+      ctx.fillText(`${txt} ${v}`, a.right - 110, py - 5);
+    }
+    ctx.restore();
+  },
+};
+let chart;
+function drawChart(animate) {
+  const m = S.metric, color = css("--accent"), bad = css("--bad"), muted = css("--muted"), line = css("--line");
+  const data = S.rows.map(r => r[m] ?? null), labels = S.rows.map(r => new Date(r.ts * 1000).toLocaleTimeString("vi-VN"));
+  const ds = {
+    data, label: M[m].label, borderColor: color, borderWidth: 2, tension: .35, fill: true,
+    backgroundColor: c => { const a = c.chart.chartArea; if (!a) return color + "22"; const g = c.chart.ctx.createLinearGradient(0, a.top, 0, a.bottom); g.addColorStop(0, color + "44"); g.addColorStop(1, color + "00"); return g; },
+    pointRadius: c => out(m, c.raw) ? 4 : 0, pointHoverRadius: 5,
+    pointBackgroundColor: c => out(m, c.raw) ? bad : color, pointBorderWidth: 0,
+    segment: { borderColor: c => out(m, c.p1.parsed.y) ? bad : undefined },
+  };
+  if (!chart) {
+    Chart.defaults.font.family = css("--f-body");
+    chart = new Chart($("chart"), {
+      type: "line", data: { labels, datasets: [ds] }, plugins: [thresholdLines],
+      options: {
+        maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        animation: reduce ? false : { duration: 900, easing: "easeOutQuart" },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${M[m].label}: ${fmt(S.metric, c.raw)} ${M[S.metric].unit}` } } },
+        scales: { x: { ticks: { maxTicksLimit: 6, color: muted }, grid: { display: false } }, y: { ticks: { color: muted }, grid: { color: line }, border: { display: false } } },
+      },
+    });
+    return;
+  }
+  chart.data.labels = labels; chart.data.datasets[0] = ds;
+  chart.options.scales.x.ticks.color = chart.options.scales.y.ticks.color = muted; chart.options.scales.y.grid.color = line;
+  chart.update(animate && !reduce ? undefined : "none");
+}
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawChart(false); renderGauges(S.rows.at(-1) || {}); });
+
+/* ---------- Dữ liệu ---------- */
+async function loadDevices() {
+  const devs = await get("/api/devices");
+  $("devCount").textContent = devs.length ? `${devs.length} thiết bị` : "";
+  if (!devs.length) return;
+  if (!S.selected || !devs.some(d => d.id === S.selected)) S.selected = devs[0].id;
+  $("devices").innerHTML = devs.map(d => `
+    <button type="button" class="dev${d.id === S.selected ? " sel" : ""}${d.open_alerts ? " alarm" : ""}" data-id="${esc(d.id)}">
+      ${d.open_alerts ? `<span class="count">${d.open_alerts}</span>` : ""}
+      <b>${esc(d.name || d.id)}</b>
+      <small>${esc(d.id)} · ${esc(d.owner)}</small>
+      <small class="num">${d.last ? `pH ${fmt("ph", d.last.ph)} · ${ago(d.last_ts)}` : "chưa có dữ liệu"}</small>
+    </button>`).join("");
+  const sel = devs.find(d => d.id === S.selected);
+  $("tankDev").textContent = `${sel.id} · ${sel.name || ""}`;
+}
+$("devices").addEventListener("click", e => {
+  const b = e.target.closest(".dev"); if (!b) return;
+  S.selected = b.dataset.id; S.rows = []; refresh(true);
+});
+
+async function loadReadings(animate) {
+  if (!S.selected) return;
+  S.rows = await get(`/api/readings?device=${encodeURIComponent(S.selected)}&limit=200`);
+  const last = S.rows.at(-1) || {};
+  S.lastTs = last.ts || 0;
+  renderGauges(last); drawChart(animate);
+}
+
+const SHORT = { ph: "pH", temp: "°C", tds: "TDS", turbidity: "NTU", flow: "L/p" };
+async function loadAlerts() {
+  const rows = await get("/api/alerts");
+  const open = rows.filter(a => !a.ack).length;
+  $("alertCount").textContent = rows.length ? `${open} chưa xử lý · ${rows.length} gần nhất` : "";
+  const prevMax = S.maxAlert;
+  S.maxAlert = rows.length ? rows[0].id : 0;
+  if (!rows.length) { $("alerts").innerHTML = `<li class="empty">Chưa có cảnh báo nào. Mọi chỉ số đang trong ngưỡng.</li>`; return; }
+  $("alerts").innerHTML = rows.map(a => `
+    <li class="alert${a.ack ? " done" : ""}${prevMax != null && a.id > prevMax ? " enter" : ""}">
+      <span class="ico">${SHORT[a.metric] || "!"}</span>
+      <div class="what"><b>${esc(M[a.metric]?.label || a.metric)} <span class="num">${fmt(a.metric in M ? a.metric : "ph", a.value)}</span> ${esc(M[a.metric]?.unit || "")}</b> · ${esc(a.reason)}
+        <small>${esc(a.device)} · ${new Date(a.ts * 1000).toLocaleString("vi-VN")}</small></div>
+      ${a.ack ? `<span class="done-tag">✓ Đã xử lý</span>` : `<button type="button" class="btn" data-ack="${a.id}">Xác nhận</button>`}
+    </li>`).join("");
+  if (prevMax != null) rows.filter(a => a.id > prevMax).slice(0, 3).reverse().forEach(toast);
+}
+
+function toast(a) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<b>⚠ ${esc(a.device)}</b> · ${esc(M[a.metric]?.label || a.metric)} <span class="num">${fmt(a.metric in M ? a.metric : "ph", a.value)}</span> ${esc(a.reason)}`;
+  $("toasts").appendChild(t);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 400); }, 4500);
+}
+
+/* ---------- Toàn vẹn dữ liệu ---------- */
+async function verify() {
+  const chip = $("chain"); chip.className = "chip busy"; $("chainText").textContent = "Đang kiểm tra…";
+  try {
+    const [r] = await Promise.all([get("/api/verify"), new Promise(ok => setTimeout(ok, 500))]);
+    chip.className = "chip " + (r.ok ? "ok" : "bad");
+    $("chainText").textContent = r.ok ? `Dữ liệu toàn vẹn · ${r.checked.toLocaleString("vi-VN")} bản ghi` : `Phát hiện sửa dữ liệu tại bản ghi #${r.broken_at}`;
+  } catch { chip.className = "chip bad"; $("chainText").textContent = "Không kiểm tra được"; }
+}
+$("chain").addEventListener("click", verify);
+
+/* ---------- Xác nhận cảnh báo ---------- */
+let adminKey = null;
+try { adminKey = sessionStorage.getItem("adminKey"); } catch {}
+async function ack(id, key) {
+  const r = await fetch("/api/alerts/ack", { method: "POST", headers: { "X-Admin-Key": key, "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+  return r.ok;
+}
+$("alerts").addEventListener("click", async e => {
+  const b = e.target.closest("[data-ack]"); if (!b) return;
+  S.ackId = +b.dataset.ack;
+  if (adminKey && await ack(S.ackId, adminKey)) return loadAlerts();
+  $("keyErr").textContent = ""; $("keyInput").value = ""; $("keyDlg").showModal();
+});
+$("keyForm").addEventListener("submit", async e => {
+  if (e.submitter?.value !== "ok") return;
+  e.preventDefault();
+  const key = $("keyInput").value;
+  if (await ack(S.ackId, key)) {
+    adminKey = key; try { sessionStorage.setItem("adminKey", key); } catch {}
+    $("keyDlg").close(); loadAlerts(); loadDevices();
+  } else $("keyErr").textContent = "Khóa không đúng. Kiểm tra biến AQUACARE_ADMIN_KEY trên server.";
+});
+
+/* ---------- Vòng cập nhật ---------- */
+let busy = false;
+async function refresh(animate) {
+  if (busy) return; busy = true;
+  try {
+    await loadDevices(); await loadReadings(animate); await loadAlerts();
+    $("live").classList.remove("stale");
+  } catch { $("live").classList.add("stale"); $("liveText").textContent = "Mất kết nối server"; }
+  finally { busy = false; }
+}
+setInterval(() => {
+  if (!$("live").classList.contains("stale") && S.lastTs) $("liveText").textContent = `Trực tiếp · cập nhật ${ago(S.lastTs)}`;
+}, 1000);
+
+get("/api/thresholds").then(t => { S.th = t; moveSlider(); refresh(true); verify(); })
+  .catch(() => { $("live").classList.add("stale"); $("liveText").textContent = "Không kết nối được server"; });
+setInterval(() => refresh(false), 3000);
+</script>
+</body>
+</html>

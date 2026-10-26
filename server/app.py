@@ -1,0 +1,224 @@
+"""AQUA CARE server: nhận số đo từ thiết bị, phát hiện bất thường, lưu chuỗi băm chống sửa dữ liệu.
+
+Chỉ dùng thư viện chuẩn Python. Chạy: python server/app.py  (mặc định cổng 8000)
+"""
+import hashlib
+import json
+import sys
+import os
+import sqlite3
+import statistics
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+ROOT = Path(__file__).parent
+DB_PATH = os.environ.get("AQUACARE_DB", str(ROOT / "aquacare.db"))
+ADMIN_KEY = os.environ.get("AQUACARE_ADMIN_KEY", "admin-dev-key")  # đổi khi triển khai thật
+
+METRICS = ("ph", "temp", "tds", "turbidity", "flow")
+# Ngưỡng mặc định. pH và nhiệt độ theo QCVN 40:2011/BTNMT cột B; TDS/độ đục/lưu lượng
+# không có trong QCVN 40 nên là giá trị tham khảo, chỉnh qua API /api/thresholds.
+DEFAULT_THRESHOLDS = {
+    "ph": [5.5, 9.0],
+    "temp": [None, 40.0],
+    "tds": [None, 2000.0],
+    "turbidity": [None, 100.0],
+    "flow": [None, None],
+}
+SPIKE_WINDOW = 20   # số mẫu gần nhất để tính trung bình
+WRITE_LOCK = threading.Lock()  # chuỗi băm cần ghi tuần tự
+SPIKE_Z = 4.0       # lệch > 4 độ lệch chuẩn => biến động bất thường
+
+
+def db():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def init_db(con):
+    con.executescript("""
+    CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT, owner TEXT, key TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS thresholds(metric TEXT PRIMARY KEY, lo REAL, hi REAL);
+    -- ledger: mọi số đo và mọi thao tác quản trị, nối bằng chuỗi băm SHA-256
+    CREATE TABLE IF NOT EXISTS ledger(seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT,
+        device TEXT, body TEXT, prev TEXT, hash TEXT);
+    CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, device TEXT,
+        metric TEXT, value REAL, reason TEXT, ack INTEGER DEFAULT 0);
+    CREATE INDEX IF NOT EXISTS ledger_dev ON ledger(device, kind, seq);
+    """)
+    for m, (lo, hi) in DEFAULT_THRESHOLDS.items():
+        con.execute("INSERT OR IGNORE INTO thresholds VALUES(?,?,?)", (m, lo, hi))
+    con.commit()
+
+
+def chain_hash(prev, ts, kind, device, body):
+    return hashlib.sha256(f"{prev}|{ts!r}|{kind}|{device}|{body}".encode()).hexdigest()
+
+
+def append(con, kind, device, data):
+    body = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    row = con.execute("SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
+    prev = row["hash"] if row else "0" * 64
+    ts = time.time()
+    h = chain_hash(prev, ts, kind, device, body)
+    con.execute("INSERT INTO ledger(ts,kind,device,body,prev,hash) VALUES(?,?,?,?,?,?)",
+                (ts, kind, device, body, prev, h))
+    return ts
+
+
+def verify_chain(con):
+    prev = "0" * 64
+    n = 0
+    for r in con.execute("SELECT * FROM ledger ORDER BY seq"):
+        if r["prev"] != prev or chain_hash(prev, r["ts"], r["kind"], r["device"], r["body"]) != r["hash"]:
+            return {"ok": False, "broken_at": r["seq"], "checked": n}
+        prev = r["hash"]
+        n += 1
+    return {"ok": True, "checked": n}
+
+
+def detect(con, device, reading):
+    """Trả về danh sách (metric, value, reason) bất thường."""
+    th = {r["metric"]: (r["lo"], r["hi"]) for r in con.execute("SELECT * FROM thresholds")}
+    recent = [json.loads(r["body"]) for r in con.execute(
+        "SELECT body FROM ledger WHERE device=? AND kind='reading' ORDER BY seq DESC LIMIT ?",
+        (device, SPIKE_WINDOW))]
+    out = []
+    for m in METRICS:
+        v = reading.get(m)
+        if v is None:
+            continue
+        lo, hi = th.get(m, (None, None))
+        if lo is not None and v < lo:
+            out.append((m, v, f"dưới ngưỡng {lo}"))
+        elif hi is not None and v > hi:
+            out.append((m, v, f"vượt ngưỡng {hi}"))
+        else:
+            hist = [r[m] for r in recent if r.get(m) is not None]
+            if len(hist) >= 5:
+                mu, sd = statistics.fmean(hist), statistics.pstdev(hist)
+                if sd > 0 and abs(v - mu) / sd > SPIKE_Z:
+                    out.append((m, v, f"biến động đột ngột (TB {mu:.2f})"))
+    return out
+
+
+def ingest(con, device, reading):
+    reading = {m: float(reading[m]) for m in METRICS if reading.get(m) is not None}
+    if not reading:
+        raise ValueError("không có chỉ số hợp lệ")
+    found = detect(con, device, reading)  # trước khi ghi, để mẫu hiện tại không tự kéo trung bình
+    ts = append(con, "reading", device, reading)
+    for m, v, why in found:
+        con.execute("INSERT INTO alerts(ts,device,metric,value,reason) VALUES(?,?,?,?,?)", (ts, device, m, v, why))
+    con.commit()
+    return found
+
+
+class Handler(BaseHTTPRequestHandler):
+    def _send(self, code, obj=None, ctype="application/json", raw=None):
+        data = raw if raw is not None else json.dumps(obj, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype + "; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 65536:
+            raise ValueError("payload quá lớn")
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def _admin(self):
+        return self.headers.get("X-Admin-Key") == ADMIN_KEY
+
+    def do_GET(self):
+        u = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        with db() as con:
+            if u.path in ("/", "/index.html"):
+                return self._send(200, ctype="text/html", raw=(ROOT / "dashboard.html").read_bytes())
+            if u.path == "/api/devices":
+                rows = con.execute("SELECT id,name,owner FROM devices").fetchall()
+                res = []
+                for r in rows:
+                    last = con.execute("SELECT ts,body FROM ledger WHERE device=? AND kind='reading' "
+                                       "ORDER BY seq DESC LIMIT 1", (r["id"],)).fetchone()
+                    open_alerts = con.execute("SELECT COUNT(*) FROM alerts WHERE device=? AND ack=0",
+                                              (r["id"],)).fetchone()[0]
+                    res.append({**dict(r), "last_ts": last and last["ts"],
+                                "last": last and json.loads(last["body"]), "open_alerts": open_alerts})
+                return self._send(200, res)
+            if u.path == "/api/readings":
+                limit = min(int(q.get("limit", 200)), 5000)
+                rows = con.execute("SELECT ts,body FROM ledger WHERE device=? AND kind='reading' "
+                                   "ORDER BY seq DESC LIMIT ?", (q.get("device"), limit)).fetchall()
+                return self._send(200, [{"ts": r["ts"], **json.loads(r["body"])} for r in reversed(rows)])
+            if u.path == "/api/alerts":
+                rows = con.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 200").fetchall()
+                return self._send(200, [dict(r) for r in rows])
+            if u.path == "/api/thresholds":
+                return self._send(200, {r["metric"]: [r["lo"], r["hi"]] for r in con.execute("SELECT * FROM thresholds")})
+            if u.path == "/api/audit":
+                rows = con.execute("SELECT seq,ts,kind,device,body,hash FROM ledger WHERE kind!='reading' "
+                                   "ORDER BY seq DESC LIMIT 200").fetchall()
+                return self._send(200, [dict(r) for r in rows])
+            if u.path == "/api/verify":
+                return self._send(200, verify_chain(con))
+        self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        u = urlparse(self.path)
+        try:
+            body = self._body()
+            with WRITE_LOCK, db() as con:
+                if u.path == "/api/readings":
+                    dev = con.execute("SELECT key FROM devices WHERE id=?", (body.get("device"),)).fetchone()
+                    if not dev or dev["key"] != self.headers.get("X-Device-Key"):
+                        return self._send(401, {"error": "sai thiết bị hoặc khóa"})
+                    found = ingest(con, body["device"], body)
+                    return self._send(200, {"ok": True, "alerts": [{"metric": m, "value": v, "reason": w} for m, v, w in found]})
+                if not self._admin():
+                    return self._send(401, {"error": "cần X-Admin-Key"})
+                if u.path == "/api/devices":
+                    key = body.get("key") or os.urandom(16).hex()
+                    con.execute("INSERT INTO devices VALUES(?,?,?,?)", (body["id"], body.get("name", ""), body.get("owner", ""), key))
+                    append(con, "device_add", body["id"], {"name": body.get("name", ""), "owner": body.get("owner", "")})
+                    con.commit()
+                    return self._send(200, {"id": body["id"], "key": key})
+                if u.path == "/api/thresholds":
+                    for m, (lo, hi) in body.items():
+                        if m not in METRICS:
+                            raise ValueError(f"chỉ số lạ: {m}")
+                        con.execute("UPDATE thresholds SET lo=?,hi=? WHERE metric=?", (lo, hi, m))
+                    append(con, "threshold_change", None, body)  # thay đổi ngưỡng được ghi vào nhật ký
+                    con.commit()
+                    return self._send(200, {"ok": True})
+                if u.path == "/api/alerts/ack":
+                    con.execute("UPDATE alerts SET ack=1 WHERE id=?", (body["id"],))
+                    append(con, "alert_ack", None, {"id": body["id"]})
+                    con.commit()
+                    return self._send(200, {"ok": True})
+        except (ValueError, KeyError, TypeError, sqlite3.IntegrityError) as e:
+            return self._send(400, {"error": str(e)})
+        self._send(404, {"error": "not found"})
+
+    def log_message(self, *a):
+        pass
+
+
+def main():
+    sys.stdout.reconfigure(encoding="utf-8")  # console Windows mặc định không in được tiếng Việt
+    with db() as con:
+        init_db(con)
+    port = int(os.environ.get("PORT", 8000))
+    print(f"AQUA CARE đang chạy: http://localhost:{port}")
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
