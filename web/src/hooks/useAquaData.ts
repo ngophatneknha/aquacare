@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, type Alert, type Device, type Reading, type Thresholds } from '../lib/api'
 
-type Snapshot = { devices: Device[]; device: string | null; readings: Reading[]; alerts: Alert[] }
-const EMPTY: Snapshot = { devices: [], device: null, readings: [], alerts: [] }
+type Snapshot = { devices: Device[]; device: string | null; readings: Reading[]; alerts: Alert[]; thresholds: Thresholds }
+const EMPTY: Snapshot = { devices: [], device: null, readings: [], alerts: [], thresholds: {} }
 
 /** Hỏi server định kỳ. `selected` null thì lấy thiết bị đầu tiên. */
 export function useAquaData(selected: string | null, intervalMs = 3000) {
   const [snap, setSnap] = useState<Snapshot>(EMPTY)
-  const [thresholds, setThresholds] = useState<Thresholds>({})
   const [online, setOnline] = useState<boolean | null>(null)
   const [nonce, setNonce] = useState(0)
-  const hasThresholds = useRef(false)
 
   useEffect(() => {
     let alive = true
@@ -19,16 +17,11 @@ export function useAquaData(selected: string | null, intervalMs = 3000) {
       if (busy) return
       busy = true
       try {
-        if (!hasThresholds.current) {
-          const th = await api.thresholds()
-          hasThresholds.current = true
-          if (alive) setThresholds(th)
-        }
-        const [devices, alerts] = await Promise.all([api.devices(), api.alerts()])
+        const [devices, alerts, thresholds] = await Promise.all([api.devices(), api.alerts(), api.thresholds()])
         const device = selected && devices.some(d => d.id === selected) ? selected : devices[0]?.id ?? null
         const readings = device ? await api.readings(device) : []
         if (alive) {
-          setSnap({ devices, device, readings, alerts })
+          setSnap({ devices, device, readings, alerts, thresholds })
           setOnline(true)
         }
       } catch {
@@ -46,5 +39,5 @@ export function useAquaData(selected: string | null, intervalMs = 3000) {
   }, [selected, intervalMs, nonce])
 
   const refresh = useCallback(() => setNonce(n => n + 1), [])
-  return { ...snap, thresholds, online, refresh }
+  return { ...snap, online, refresh }
 }

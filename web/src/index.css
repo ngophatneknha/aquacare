@@ -41,7 +41,7 @@
   .pill-bad { @apply bg-bad/15 text-bad; }
   .pill-bad::before { animation: blink 1s steps(2) infinite; }
   .btn {
-    @apply relative overflow-hidden rounded-[10px] bg-accent px-3 py-1.5 text-[13px] font-semibold text-surface transition hover:brightness-110 active:scale-95;
+    @apply relative overflow-hidden whitespace-nowrap rounded-[10px] bg-accent px-3 py-1.5 text-[13px] font-semibold text-surface transition hover:brightness-110 active:scale-95;
   }
   .btn-ghost { @apply border border-line bg-transparent text-ink; }
 }

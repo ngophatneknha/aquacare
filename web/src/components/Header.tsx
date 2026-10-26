@@ -3,10 +3,14 @@ import { api, DEMO, type ChainStatus } from '../lib/api'
 import { ago } from '../lib/metrics'
 import { useNow } from '../hooks/useNow'
 import type { ThemeChoice } from '../hooks/useTheme'
+import { PAGES, type PageId } from '../hooks/usePage'
 
-type Props = { online: boolean | null; lastTs: number | null; theme: ThemeChoice; onTheme: (t: ThemeChoice) => void }
+type Props = {
+  online: boolean | null; lastTs: number | null; theme: ThemeChoice; onTheme: (t: ThemeChoice) => void
+  page: PageId; onPage: (p: PageId) => void; openAlerts: number
+}
 
-export function Header({ online, lastTs, theme, onTheme }: Props) {
+export function Header({ online, lastTs, theme, onTheme, page, onPage, openAlerts }: Props) {
   return (
     <header className="sticky top-[env(safe-area-inset-top,0px)] z-20 border-b border-line bg-bg/80 backdrop-blur-xl backdrop-saturate-150 max-sm:static">
       <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-3 px-[max(16px,env(safe-area-inset-left,0px))] py-3">
@@ -26,6 +30,27 @@ export function Header({ online, lastTs, theme, onTheme }: Props) {
         <IntegrityButton />
         <ThemeToggle value={theme} onChange={onTheme} />
       </div>
+      <nav aria-label="Trang" className="mx-auto max-w-[1320px] overflow-x-auto px-[max(16px,env(safe-area-inset-left,0px))]">
+        <ul className="flex gap-1">
+          {PAGES.map(p => (
+            <li key={p.id}>
+              <a
+                href={`#${p.id}`}
+                aria-current={page === p.id ? 'page' : undefined}
+                onClick={e => { e.preventDefault(); onPage(p.id) }}
+                className={`relative flex items-center gap-1.5 whitespace-nowrap px-3 pb-2.5 pt-1 text-[13.5px] font-semibold transition-colors
+                  after:absolute after:inset-x-2 after:bottom-0 after:h-[2.5px] after:origin-center after:rounded-full after:bg-accent after:transition-transform after:duration-300
+                  ${page === p.id ? 'text-ink after:scale-x-100' : 'text-muted after:scale-x-0 hover:text-ink'}`}
+              >
+                {p.label}
+                {p.id === 'canh-bao' && openAlerts > 0 && (
+                  <span key={openAlerts} className="num rounded-full bg-bad px-1.5 text-[11px] font-semibold leading-[18px] text-white animate-pop">{openAlerts}</span>
+                )}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
     </header>
   )
 }

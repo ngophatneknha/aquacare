@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CategoryScale, Chart as ChartJS, Filler, LinearScale, LineElement, PointElement, Tooltip,
   type ChartOptions, type ChartType, type Plugin, type ScriptableContext,
@@ -42,9 +42,9 @@ const thresholdLines: Plugin<'line', ThresholdOpts> = {
 }
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, thresholdLines)
 
-type Props = { readings: Reading[]; thresholds: Thresholds; theme: string }
+type Props = { readings: Reading[]; thresholds: Thresholds; theme: string; actions?: ReactNode }
 
-export function TrendChart({ readings, thresholds, theme }: Props) {
+export function TrendChart({ readings, thresholds, theme, actions }: Props) {
   const [metric, setMetric] = useState<MetricKey>('ph')
   const m = METRICS[metric]
   const [lo, hi] = thresholds[metric] ?? [null, null]
@@ -103,7 +103,10 @@ export function TrendChart({ readings, thresholds, theme }: Props) {
     <section className="panel animate-rise" style={{ animationDelay: '.22s' }}>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
         <h3 className="font-display text-base font-bold">Diễn biến {readings.length} mẫu gần nhất</h3>
-        <MetricTabs value={metric} onChange={setMetric} />
+        <div className="flex flex-wrap items-center gap-2">
+          <MetricTabs value={metric} onChange={setMetric} />
+          {actions}
+        </div>
       </div>
       <div className="relative h-[320px] px-3 pb-3.5 pt-2">
         {readings.length ? (

@@ -52,12 +52,27 @@ Thử bản demo ở máy: `cd web && VITE_DEMO=true npm run build && npx vite p
 | Phần | File | Làm gì |
 |---|---|---|
 | Server | `server/app.py` | Nhận số đo, phát hiện vượt ngưỡng + biến động đột ngột, lưu cảnh báo, API |
-| Dashboard | `web/` (React 18 + Vite 5 + TailwindCSS 3, Chart.js) | Bể pH sóng động, 4 đồng hồ chỉ số, biểu đồ có ngưỡng QCVN, cảnh báo + toast, kiểm tra toàn vẹn, sáng/tối |
+| Dashboard | `web/` (React 18 + Vite 5 + TailwindCSS 3, Chart.js) | 5 trang, xem bên dưới |
 | Firmware | `firmware/aquacare_esp32/` | Đọc 5 cảm biến, gửi lên server mỗi 30 giây |
 | Giả lập | `simulator.py` | 2 nhà máy ảo, thỉnh thoảng giả lập xả thải bất thường |
 
+### Các trang của dashboard
+
+| Trang | Dành cho | Chức năng |
+|---|---|---|
+| **Tổng quan** | Cơ quan quản lý | Xếp hạng cơ sở cần ưu tiên kiểm tra; chỉ số thí điểm: thiết bị trực tuyến, cảnh báo 24 giờ, tỷ lệ cảnh báo sai, thời gian xử lý trung bình |
+| **Giám sát** | Kỹ sư vận hành | Bể pH sóng động, 4 đồng hồ chỉ số, biểu đồ có ngưỡng QCVN, cảnh báo đang mở của thiết bị, xuất CSV |
+| **Cảnh báo** | Cả hai | Lọc theo trạng thái / thiết bị / loại; quy trình Mới → Đang kiểm tra → Đã xử lý / Cảnh báo sai kèm ghi chú; gợi ý hướng kiểm tra theo từng loại sự cố |
+| **Thiết bị & ngưỡng** | Quản trị | Trạng thái kết nối, hạn hiệu chuẩn 30 ngày, ghi nhận hiệu chuẩn, thêm thiết bị (tạo khóa), chỉnh ngưỡng |
+| **Nhật ký** | Thanh tra | Mọi thao tác quản trị kèm mã băm; kiểm tra toàn vẹn toàn bộ dữ liệu |
+
+**Phân loại cảnh báo**: *vượt ngưỡng*, *biến động đột ngột* (lệch > 4 độ lệch chuẩn so với 20 mẫu trước),
+và *lỗi cảm biến* (số ngoài dải đo vật lý, ví dụ pH > 14), để không nhầm hỏng đầu dò với xả thải.
+
+**Gợi ý xử lý** hiện dựa trên luật theo kinh nghiệm vận hành (pH thấp → kiểm tra bơm định lượng xút…), chưa phải AI.
+
 **Chống làm sai lệch dữ liệu** (vấn đề nêu trong thuyết minh, tháng 4/2026): mọi số đo và mọi thao tác quản trị
-(thêm thiết bị, đổi ngưỡng, xác nhận cảnh báo) được ghi vào một sổ cái nối bằng chuỗi băm SHA-256.
+(thêm thiết bị, đổi ngưỡng, hiệu chuẩn, xử lý cảnh báo) được ghi vào một sổ cái nối bằng chuỗi băm SHA-256.
 Sửa một bản ghi cũ trong DB sẽ làm `/api/verify` báo lỗi tại đúng bản ghi đó.
 
 **Ngưỡng mặc định**: pH 5.5–9, nhiệt độ ≤ 40°C theo QCVN 40:2011/BTNMT cột B. TDS ≤ 2000 ppm, độ đục ≤ 100 NTU
@@ -71,7 +86,10 @@ là giá trị tham khảo (QCVN 40 không quy định) — chỉnh theo ngành 
 | POST | `/api/readings` | `X-Device-Key` | `{"device","ph","temp","tds","turbidity","flow"}` |
 | GET | `/api/devices`, `/api/readings?device=`, `/api/alerts`, `/api/audit`, `/api/verify` | | |
 | GET/POST | `/api/thresholds` | `X-Admin-Key` khi POST | `{"ph":[5.5,9]}` |
-| POST | `/api/alerts/ack` | `X-Admin-Key` | `{"id"}` |
+| POST | `/api/alerts/update` | `X-Admin-Key` | `{"id","status","note"}`; status: `new`, `investigating`, `resolved`, `false_alarm` |
+| POST | `/api/devices/calibrate` | `X-Admin-Key` | `{"id","note"}` |
+
+DB tạo từ bản cũ được tự nâng cấp khi khởi động server (cảnh báo đã xác nhận chuyển thành "Đã xử lý").
 
 Biến môi trường: `PORT`, `AQUACARE_DB`, `AQUACARE_ADMIN_KEY` (mặc định `admin-dev-key` — **phải đổi khi triển khai**).
 

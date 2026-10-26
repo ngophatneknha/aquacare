@@ -1,6 +1,7 @@
 import type { Device } from '../lib/api'
 import { ago, fmt } from '../lib/metrics'
 import { useNow } from '../hooks/useNow'
+import { isOnline } from '../lib/kpi'
 
 type Props = { devices: Device[]; selected: string | null; onSelect: (id: string) => void }
 
@@ -29,7 +30,7 @@ export function DeviceList({ devices, selected, onSelect }: Props) {
                 className={`relative grid w-full gap-0.5 rounded-[10px] border py-3 pl-4 pr-3 text-left transition duration-200 ease-out hover:translate-x-[3px]
                   ${sel ? 'border-accent bg-accent/10' : 'border-line bg-sunk hover:border-accent/45'}`}
               >
-                <span className={`absolute inset-y-2.5 left-0 w-[3px] rounded-full ${d.open_alerts ? 'bg-bad' : 'bg-ok'}`} />
+                <span className={`absolute inset-y-2.5 left-0 w-[3px] rounded-full ${d.open_alerts ? 'bg-bad' : isOnline(d, now / 1000) ? 'bg-ok' : 'bg-muted'}`} />
                 {d.open_alerts > 0 && (
                   <span key={d.open_alerts} className="num absolute right-2.5 top-2.5 rounded-full bg-bad px-2 text-[11px] font-semibold text-white animate-pop">
                     {d.open_alerts}

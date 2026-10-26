@@ -11,6 +11,7 @@ import sqlite3
 import statistics
 import threading
 import time
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -33,31 +34,61 @@ DEFAULT_THRESHOLDS = {
     "turbidity": [None, 100.0],
     "flow": [None, None],
 }
+# Dải đo vật lý của đầu dò: số ngoài dải này là lỗi cảm biến, không phải ô nhiễm
+PHYSICAL = {"ph": (0, 14), "temp": (-5, 100), "tds": (0, 20000), "turbidity": (0, 4000), "flow": (0, None)}
+ALERT_STATUSES = ("new", "investigating", "resolved", "false_alarm")
+OPEN_STATUSES = ("new", "investigating")
 SPIKE_WINDOW = 20   # số mẫu gần nhất để tính trung bình
 WRITE_LOCK = threading.Lock()  # chuỗi băm cần ghi tuần tự
 SPIKE_Z = 4.0       # lệch > 4 độ lệch chuẩn => biến động bất thường
 
 
+@contextmanager
 def db():
+    # "with sqlite3.connect()" chỉ commit/rollback, không đóng kết nối
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    return con
+    try:
+        with con:
+            yield con
+    finally:
+        con.close()
 
 
 def init_db(con):
     con.executescript("""
-    CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT, owner TEXT, key TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY, name TEXT, owner TEXT, key TEXT NOT NULL,
+        calibrated_ts REAL);
     CREATE TABLE IF NOT EXISTS thresholds(metric TEXT PRIMARY KEY, lo REAL, hi REAL);
     -- ledger: mọi số đo và mọi thao tác quản trị, nối bằng chuỗi băm SHA-256
     CREATE TABLE IF NOT EXISTS ledger(seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT,
         device TEXT, body TEXT, prev TEXT, hash TEXT);
     CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, device TEXT,
-        metric TEXT, value REAL, reason TEXT, ack INTEGER DEFAULT 0);
+        metric TEXT, value REAL, reason TEXT, kind TEXT DEFAULT 'threshold', status TEXT DEFAULT 'new',
+        note TEXT DEFAULT '', closed_ts REAL);
     CREATE INDEX IF NOT EXISTS ledger_dev ON ledger(device, kind, seq);
     """)
+    # DB tạo từ bản cũ: thêm cột mới, chuyển cờ ack cũ sang trạng thái
+    add_columns(con, "devices", {"calibrated_ts": "REAL"})
+    if add_columns(con, "alerts", {"kind": "TEXT DEFAULT 'threshold'", "status": "TEXT DEFAULT 'new'",
+                                   "note": "TEXT DEFAULT ''", "closed_ts": "REAL"}):
+        if "ack" in columns(con, "alerts"):
+            con.execute("UPDATE alerts SET status='resolved', closed_ts=ts WHERE ack=1")
     for m, (lo, hi) in DEFAULT_THRESHOLDS.items():
         con.execute("INSERT OR IGNORE INTO thresholds VALUES(?,?,?)", (m, lo, hi))
     con.commit()
+
+
+def columns(con, table):
+    return {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+
+
+def add_columns(con, table, cols):
+    """Thêm các cột còn thiếu; trả về True nếu có thêm."""
+    missing = {c: d for c, d in cols.items() if c not in columns(con, table)}
+    for c, d in missing.items():
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {c} {d}")
+    return bool(missing)
 
 
 def chain_hash(prev, ts, kind, device, body):
@@ -87,7 +118,7 @@ def verify_chain(con):
 
 
 def detect(con, device, reading):
-    """Trả về danh sách (metric, value, reason) bất thường."""
+    """Trả về danh sách (metric, value, reason, kind) bất thường; kind: sensor | threshold | spike."""
     th = {r["metric"]: (r["lo"], r["hi"]) for r in con.execute("SELECT * FROM thresholds")}
     recent = [json.loads(r["body"]) for r in con.execute(
         "SELECT body FROM ledger WHERE device=? AND kind='reading' ORDER BY seq DESC LIMIT ?",
@@ -98,16 +129,19 @@ def detect(con, device, reading):
         if v is None:
             continue
         lo, hi = th.get(m, (None, None))
-        if lo is not None and v < lo:
-            out.append((m, v, f"dưới ngưỡng {lo}"))
+        plo, phi = PHYSICAL[m]
+        if v < plo or (phi is not None and v > phi):
+            out.append((m, v, "ngoài dải đo, nghi lỗi cảm biến", "sensor"))
+        elif lo is not None and v < lo:
+            out.append((m, v, f"dưới ngưỡng {lo}", "threshold"))
         elif hi is not None and v > hi:
-            out.append((m, v, f"vượt ngưỡng {hi}"))
+            out.append((m, v, f"vượt ngưỡng {hi}", "threshold"))
         else:
             hist = [r[m] for r in recent if r.get(m) is not None]
             if len(hist) >= 5:
                 mu, sd = statistics.fmean(hist), statistics.pstdev(hist)
                 if sd > 0 and abs(v - mu) / sd > SPIKE_Z:
-                    out.append((m, v, f"biến động đột ngột (TB {mu:.2f})"))
+                    out.append((m, v, f"biến động đột ngột (TB {mu:.2f})", "spike"))
     return out
 
 
@@ -117,8 +151,9 @@ def ingest(con, device, reading):
         raise ValueError("không có chỉ số hợp lệ")
     found = detect(con, device, reading)  # trước khi ghi, để mẫu hiện tại không tự kéo trung bình
     ts = append(con, "reading", device, reading)
-    for m, v, why in found:
-        con.execute("INSERT INTO alerts(ts,device,metric,value,reason) VALUES(?,?,?,?,?)", (ts, device, m, v, why))
+    for m, v, why, kind in found:
+        con.execute("INSERT INTO alerts(ts,device,metric,value,reason,kind) VALUES(?,?,?,?,?,?)",
+                    (ts, device, m, v, why, kind))
     con.commit()
     return found
 
@@ -146,13 +181,13 @@ class Handler(BaseHTTPRequestHandler):
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         with db() as con:
             if u.path == "/api/devices":
-                rows = con.execute("SELECT id,name,owner FROM devices").fetchall()
+                rows = con.execute("SELECT id,name,owner,calibrated_ts FROM devices").fetchall()
                 res = []
                 for r in rows:
                     last = con.execute("SELECT ts,body FROM ledger WHERE device=? AND kind='reading' "
                                        "ORDER BY seq DESC LIMIT 1", (r["id"],)).fetchone()
-                    open_alerts = con.execute("SELECT COUNT(*) FROM alerts WHERE device=? AND ack=0",
-                                              (r["id"],)).fetchone()[0]
+                    open_alerts = con.execute("SELECT COUNT(*) FROM alerts WHERE device=? AND status IN (?,?)",
+                                              (r["id"], *OPEN_STATUSES)).fetchone()[0]
                     res.append({**dict(r), "last_ts": last and last["ts"],
                                 "last": last and json.loads(last["body"]), "open_alerts": open_alerts})
                 return self._send(200, res)
@@ -162,7 +197,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "ORDER BY seq DESC LIMIT ?", (q.get("device"), limit)).fetchall()
                 return self._send(200, [{"ts": r["ts"], **json.loads(r["body"])} for r in reversed(rows)])
             if u.path == "/api/alerts":
-                rows = con.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 200").fetchall()
+                rows = con.execute("SELECT id,ts,device,metric,value,reason,kind,status,note,closed_ts "
+                                   "FROM alerts ORDER BY id DESC LIMIT 500").fetchall()
                 return self._send(200, [dict(r) for r in rows])
             if u.path == "/api/thresholds":
                 return self._send(200, {r["metric"]: [r["lo"], r["hi"]] for r in con.execute("SELECT * FROM thresholds")})
@@ -196,26 +232,46 @@ class Handler(BaseHTTPRequestHandler):
                     if not dev or dev["key"] != self.headers.get("X-Device-Key"):
                         return self._send(401, {"error": "sai thiết bị hoặc khóa"})
                     found = ingest(con, body["device"], body)
-                    return self._send(200, {"ok": True, "alerts": [{"metric": m, "value": v, "reason": w} for m, v, w in found]})
+                    return self._send(200, {"ok": True, "alerts": [
+                        {"metric": m, "value": v, "reason": w, "kind": k} for m, v, w, k in found]})
                 if not self._admin():
                     return self._send(401, {"error": "cần X-Admin-Key"})
                 if u.path == "/api/devices":
                     key = body.get("key") or os.urandom(16).hex()
-                    con.execute("INSERT INTO devices VALUES(?,?,?,?)", (body["id"], body.get("name", ""), body.get("owner", ""), key))
+                    con.execute("INSERT INTO devices(id,name,owner,key) VALUES(?,?,?,?)", (body["id"], body.get("name", ""), body.get("owner", ""), key))
                     append(con, "device_add", body["id"], {"name": body.get("name", ""), "owner": body.get("owner", "")})
                     con.commit()
                     return self._send(200, {"id": body["id"], "key": key})
+                if u.path == "/api/devices/calibrate":
+                    if not con.execute("SELECT 1 FROM devices WHERE id=?", (body["id"],)).fetchone():
+                        return self._send(404, {"error": "không có thiết bị này"})
+                    ts = append(con, "calibration", body["id"], {"note": str(body.get("note", ""))[:500]})
+                    con.execute("UPDATE devices SET calibrated_ts=? WHERE id=?", (ts, body["id"]))
+                    con.commit()
+                    return self._send(200, {"ok": True, "calibrated_ts": ts})
                 if u.path == "/api/thresholds":
                     for m, (lo, hi) in body.items():
                         if m not in METRICS:
                             raise ValueError(f"chỉ số lạ: {m}")
+                        if any(x is not None and (isinstance(x, bool) or not isinstance(x, (int, float))) for x in (lo, hi)):
+                            raise ValueError(f"ngưỡng {m} phải là số hoặc để trống")
+                        if lo is not None and hi is not None and lo > hi:
+                            raise ValueError(f"ngưỡng dưới của {m} lớn hơn ngưỡng trên")
+                    for m, (lo, hi) in body.items():
                         con.execute("UPDATE thresholds SET lo=?,hi=? WHERE metric=?", (lo, hi, m))
                     append(con, "threshold_change", None, body)  # thay đổi ngưỡng được ghi vào nhật ký
                     con.commit()
                     return self._send(200, {"ok": True})
-                if u.path == "/api/alerts/ack":
-                    con.execute("UPDATE alerts SET ack=1 WHERE id=?", (body["id"],))
-                    append(con, "alert_ack", None, {"id": body["id"]})
+                if u.path == "/api/alerts/update":
+                    status, note = body["status"], str(body.get("note", ""))[:1000]
+                    if status not in ALERT_STATUSES:
+                        raise ValueError(f"trạng thái lạ: {status}")
+                    closed = time.time() if status not in OPEN_STATUSES else None
+                    cur = con.execute("UPDATE alerts SET status=?, note=?, closed_ts=? WHERE id=?",
+                                      (status, note, closed, body["id"]))
+                    if not cur.rowcount:
+                        return self._send(404, {"error": "không có cảnh báo này"})
+                    append(con, "alert_update", None, {"id": body["id"], "status": status, "note": note})
                     con.commit()
                     return self._send(200, {"ok": True})
         except (ValueError, KeyError, TypeError, sqlite3.IntegrityError) as e:

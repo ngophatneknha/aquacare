@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { DEMO } from '../lib/api'
 
-type Props = { open: boolean; onSubmit: (key: string) => Promise<boolean>; onClose: () => void }
+type Props = { open: boolean; onSubmit: (key: string) => Promise<string | null>; onClose: () => void }
 
-/** Hỏi khóa quản trị trước khi xác nhận cảnh báo. onSubmit trả false nếu sai khóa. */
+/** Hỏi khóa quản trị. onSubmit trả về thông báo lỗi, hoặc null nếu thành công. */
 export function AdminKeyDialog({ open, onSubmit, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const [key, setKey] = useState('')
@@ -22,13 +22,8 @@ export function AdminKeyDialog({ open, onSubmit, onClose }: Props) {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
-    try {
-      if (!(await onSubmit(key))) setError('Khóa không đúng. Kiểm tra biến AQUACARE_ADMIN_KEY trên server.')
-    } catch {
-      setError('Không gửi được tới server. Kiểm tra kết nối rồi thử lại.')
-    } finally {
-      setBusy(false)
-    }
+    setError((await onSubmit(key)) ?? '')
+    setBusy(false)
   }
 
   return (
@@ -38,9 +33,9 @@ export function AdminKeyDialog({ open, onSubmit, onClose }: Props) {
       className="w-[min(380px,calc(100vw-32px))] rounded-2xl border border-line bg-surface p-5 text-ink shadow-card open:animate-rise"
     >
       <form onSubmit={submit}>
-        <h4 className="mb-1.5 font-display text-[17px] font-bold">Xác nhận đã xử lý cảnh báo</h4>
+        <h4 className="mb-1.5 font-display text-[17px] font-bold">Cần khóa quản trị</h4>
         <p className="mb-3.5 text-muted">
-          Thao tác này được ghi vào nhật ký chống sửa. Nhập khóa quản trị để tiếp tục.
+          Thao tác này được ghi vào nhật ký chống sửa. Khóa được nhớ đến khi đóng trình duyệt.
           {DEMO && ' Bản demo nhận khóa bất kỳ.'}
         </p>
         <label htmlFor="admin-key" className="eyebrow">Khóa quản trị</label>
@@ -57,7 +52,7 @@ export function AdminKeyDialog({ open, onSubmit, onClose }: Props) {
         <p className="mt-2 min-h-[1.2em] text-[12.5px] text-bad" role="alert">{error}</p>
         <div className="mt-2 flex justify-end gap-2">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Hủy</button>
-          <button type="submit" className="btn" disabled={busy}>{busy ? 'Đang gửi…' : 'Xác nhận'}</button>
+          <button type="submit" className="btn" disabled={busy}>{busy ? 'Đang gửi…' : 'Tiếp tục'}</button>
         </div>
       </form>
     </dialog>
